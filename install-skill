@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# 把本仓库 skills/ 下的技能安装到 pi 的全局技能目录。
+#
+#   ./install-skill              # 安装到 ~/.pi/agent/skills/
+#   PI_SKILLS_DIR=... ./install-skill
+#
+# 用「复制」而不是「符号链接」：pi 的技能发现遍历目录，
+# 复制可以避免不同实现对符号链接的处理差异，行为确定。
+# 代价是改完技能要重新跑一次本脚本。
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$SCRIPT_DIR/skills"
+DEST="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
+
+[ -d "$SRC" ] || { echo "找不到技能目录: $SRC" >&2; exit 1; }
+mkdir -p "$DEST"
+
+installed=0
+for skill in "$SRC"/*/; do
+  [ -d "$skill" ] || continue
+  name="$(basename "$skill")"
+  if [ ! -f "$skill/SKILL.md" ]; then
+    echo "跳过 $name（没有 SKILL.md）" >&2
+    continue
+  fi
+  rm -rf "${DEST:?}/$name"
+  cp -r "$skill" "$DEST/$name"
+  echo "✅ $name → $DEST/$name"
+  installed=$((installed + 1))
+done
+
+[ "$installed" -gt 0 ] || { echo "没有可安装的技能" >&2; exit 1; }
+echo
+echo "已安装 $installed 个技能。在 pi 里用 /skill:sync-conventions 调用。"

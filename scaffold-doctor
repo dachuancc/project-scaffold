@@ -1,0 +1,176 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""scaffold-doctor —— 跨项目约定漂移检测（这件事的「确定性」那一半）。
+
+它只做**检测**：比对每个项目是否落实了 conventions.toml 里登记的约定。
+它不做**判断**：某条漂移是该同步，还是该项目合理的本地定制——那是 agent 的活
+（见 skills/sync-conventions/SKILL.md）。
+
+为什么需要它：git 的版本单位是「仓库」，而约定文件（AGENTS.md / DECISIONS.md）
+属于**一族仓库**。模板更新后，已有项目不会自动跟进 —— 会漂移。
+在 LLM 时代，漂移不是美观问题而是**正确性问题**：agent 把过期文件当真理执行。
+
+用法:
+    ./scaffold-doctor                 # 扫描 ~/Documents/projects
+    ./scaffold-doctor --root DIR
+    ./scaffold-doctor --json          # 结构化输出，给 agent / 脚本消费
+
+退出码: 0 = 无漂移; 1 = 有漂移; 2 = 用法或配置错误
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CONVENTIONS_FILE = SCRIPT_DIR / "conventions.toml"
+TEMPLATE_DIR = SCRIPT_DIR / "_template"
+DEFAULT_ROOT = Path.home() / "Documents" / "projects"
+
+# 项目识别：含 AGENTS.md 的目录；跳过以 . 或 _ 开头的（_template 等）
+SKIP_PREFIXES = (".", "_")
+
+
+def load_conventions(path: Path) -> list[dict]:
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    return list(data.get("convention", []))
+
+
+def discover_projects(root: Path) -> list[Path]:
+    projects = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir() or entry.name.startswith(SKIP_PREFIXES):
+            continue
+        if (entry / "AGENTS.md").exists():
+            projects.append(entry)
+    return projects
+
+
+def check_project(project: Path, conventions: list[dict]) -> list[dict]:
+    checks = []
+    for conv in conventions:
+        target = project / conv["where"]
+        status, matched = "missing_file", None
+        if target.exists():
+            text = target.read_text(encoding="utf-8", errors="replace")
+            hit = re.search(conv["pattern"], text, re.MULTILINE)
+            if hit:
+                status, matched = "ok", hit.group(0)
+            else:
+                status = "drift"
+        checks.append(
+            {
+                "id": conv["id"],
+                "title": conv["title"],
+                "where": conv["where"],
+                "status": status,
+                "matched": matched,
+            }
+        )
+    return checks
+
+
+def build_report(root: Path, conventions: list[dict]) -> dict:
+    projects = discover_projects(root)
+    report: dict = {
+        "root": str(root),
+        "template": str(TEMPLATE_DIR),
+        "conventions": [
+            {
+                "id": c["id"],
+                "title": c["title"],
+                "kind": c.get("kind", "structural"),
+                "where": c["where"],
+                "since": c.get("since", ""),
+                "why": c.get("why", ""),
+            }
+            for c in conventions
+        ],
+        "projects": [],
+    }
+
+    drift_total = 0
+    for project in projects:
+        checks = check_project(project, conventions)
+        drift = [c["id"] for c in checks if c["status"] != "ok"]
+        drift_total += len(drift)
+        report["projects"].append(
+            {"name": project.name, "path": str(project), "checks": checks, "drift": drift}
+        )
+
+    report["summary"] = {
+        "projects": len(projects),
+        "checks": len(projects) * len(conventions),
+        "drift": drift_total,
+    }
+    return report
+
+
+def print_human(report: dict) -> None:
+    print("scaffold-doctor —— 跨项目约定漂移检测")
+    print(f"扫描: {report['root']}")
+    print(f"模板: {report['template']}")
+    s = report["summary"]
+    print(f"项目: {s['projects']} 个   约定: {len(report['conventions'])} 条   "
+          f"检查: {s['checks']} 项   漂移: {s['drift']} 项")
+    print()
+
+    for i, conv in enumerate(report["conventions"], 1):
+        ok = [p["name"] for p in report["projects"]
+              if all(c["status"] == "ok" for c in p["checks"] if c["id"] == conv["id"])]
+        bad = [p["name"] for p in report["projects"]
+               if any(c["status"] != "ok" for c in p["checks"] if c["id"] == conv["id"])]
+
+        print(f"{i}. {conv['id']} — {conv['title']}   "
+              f"[{conv.get('kind', 'structural')}] ({conv['where']}, since {conv['since']})")
+        if conv["why"]:
+            print(f"   理由: {conv['why']}")
+        if ok:
+            print(f"   ✅ 已落实 ({len(ok)}): {'  '.join(ok)}")
+        if bad:
+            print(f"   ❌ 待处理 ({len(bad)}): {'  '.join(bad)}")
+        print()
+
+    if s["drift"]:
+        print("→ 运行 /skill:sync-conventions 让 agent 逐条判断并落地（有些漂移是合理的本地定制）。")
+    else:
+        print("→ 无漂移。")
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="scaffold-doctor", description="跨项目约定漂移检测")
+    ap.add_argument("--root", type=Path, default=DEFAULT_ROOT, help="项目根目录")
+    ap.add_argument("--json", action="store_true", help="输出 JSON")
+    args = ap.parse_args(argv)
+
+    if not CONVENTIONS_FILE.exists():
+        print(f"找不到约定登记表: {CONVENTIONS_FILE}", file=sys.stderr)
+        return 2
+    conventions = load_conventions(CONVENTIONS_FILE)
+    if not conventions:
+        print(f"约定登记表为空: {CONVENTIONS_FILE}", file=sys.stderr)
+        return 2
+    if not args.root.is_dir():
+        print(f"扫描目录不存在: {args.root}", file=sys.stderr)
+        return 2
+
+    report = build_report(args.root, conventions)
+
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print_human(report)
+
+    return 1 if report["summary"]["drift"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,46 @@
+# project-scaffold — 跨项目标准约定登记表
+#
+# scaffold-doctor 读这个文件，检测各项目是否落实了这些约定。
+# 新增约定时：先在 _template/ 里写清它，再来这里登记一条 pattern。
+#
+# ⚠️ pattern 是**正则**，不是精确字符串。
+#    因为同一条约定在不同项目里会落成不同措辞——例如「验证需给出结论」这条，
+#    正文项目写成「没有验证 = 没做完」，笔记项目写成「没有验证 = 没写完」。
+#    精确匹配会误报，所以这里用模式容忍合理变化。
+#
+# ⚠️ 检测结果是**信号，不是判决**。正则匹配的是结构，不是意图：
+#    它可能误报（同一约定的不同措辞），也可能报出真缺失但**解法不是照抄模板**。
+#    实测两种情形均出现过，见 skills/sync-conventions/SKILL.md 的「检测结果只是信号」。
+#    最终判断交给 agent。
+
+# kind 两种：
+#   structural — 结构性约定：补标题 / 补规则即可，agent 能独立完成
+#   content    — 内容性约定：需要人提供素材（如「考虑过的其他选项」要真有其事），
+#                agent 只能搭骨架 + 列出待补清单
+
+[[convention]]
+id = "verification-conclusion"
+title = "验证需显式给出结论"
+kind = "structural"
+where = "AGENTS.md"
+pattern = '没有验证\s*=\s*没(做完|写完)'
+since = "2026-09-17"
+why = '借 spec-kit 的验证闭环：没有验证不算完成，禁止用「应该没问题」结案'
+
+[[convention]]
+id = "roadmap-next-step"
+title = "ROADMAP 有独立的「下一步」小节"
+kind = "structural"
+where = "docs/ROADMAP.md"
+pattern = '^## 下一步'
+since = "2026-09-17"
+why = '接手的人第一眼要知道从哪继续；藏在「当前状态」散文里容易被略过'
+
+[[convention]]
+id = "decisions-considered-options"
+title = "决策记录包含「考虑过的其他选项」"
+kind = "content"
+where = "docs/DECISIONS.md"
+pattern = '考虑过的其他选项'
+since = "2026-09-17"
+why = '只写「为什么选 A」，接手者会把 B/C/D 重新提一遍；写下「为什么不选」才拦得住重复讨论'
