@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# new-project —— 从 _template/ 生成一个新项目骨架
+set -euo pipefail
+
+# 解析脚本真实路径（即使通过符号链接从任意目录调用）
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SELF")"
+TEMPLATE="$SCRIPT_DIR/_template"
+
+usage() {
+  cat <<'EOF'
+用法: new-project <项目名> "<一句话简介>" ["<技术栈要点>"]
+
+从 _template/ 复制文档骨架，替换占位符，在当前目录生成 <项目名>/ 并初始化 git。
+（模板取自本脚本所在目录，与当前工作目录无关。）
+
+示例:
+  cd ~/Documents/projects
+  ./new-project hello-finance "个人记账小工具" "Python 3.12 + FastAPI + SQLite"
+EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then usage; exit 0; fi
+if [ $# -lt 2 ]; then usage; exit 1; fi
+
+NAME="$1"
+DESC="$2"
+STACK="${3:-TODO: 技术栈要点}"
+
+if ! [[ "$NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "错误: 项目名只允许字母/数字/._-（要用作目录名和仓库名）" >&2
+  exit 1
+fi
+
+DEST="$PWD/$NAME"
+
+[ -d "$TEMPLATE" ] || { echo "错误: 找不到模板目录 $TEMPLATE" >&2; exit 1; }
+[ -e "$DEST" ] && { echo "错误: $DEST 已存在，换个名字或先删除" >&2; exit 1; }
+
+# sed 替换值转义（& | \ 是特殊字符）
+esc() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
+NAME_E="$(esc "$NAME")"; DESC_E="$(esc "$DESC")"; STACK_E="$(esc "$STACK")"
+
+cp -r "$TEMPLATE" "$DEST"
+
+while IFS= read -r -d '' f; do
+  sed -i \
+    -e "s|{{PROJECT_NAME}}|$NAME_E|g" \
+    -e "s|{{PROJECT_DESC}}|$DESC_E|g" \
+    -e "s|{{TECH_STACK}}|$STACK_E|g" \
+    "$f"
+done < <(find "$DEST" -type f -print0)
+
+git -C "$DEST" init -q
+git -C "$DEST" add -A
+git -C "$DEST" commit -q -m "初始化: 从 _template 生成项目骨架"
+
+cat <<EOF
+✅ 已创建 $DEST
+
+下一步:
+  cd "$NAME"
+  # 按 README / AGENTS.md 里的 TODO 填写技术栈、命令、红线
+  # 需要时再建远端:  gh repo create $NAME --private --source=. --push
+EOF
