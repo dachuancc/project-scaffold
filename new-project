@@ -51,7 +51,14 @@ while IFS= read -r -d '' f; do
     "$f"
 done < <(find "$DEST" -type f -print0)
 
-git -C "$DEST" init -q
+# 显式指定初始分支名，**不要依赖 init.defaultBranch**——
+# 不同机器可能没配，那时 git 会回落到内置默认（master），项目之间就会漂移。
+# （历史上就出过一次：9 个项目里 8 个 master、1 个 main，2026-09 统一到 main）
+if ! git -C "$DEST" init -q -b main 2>/dev/null; then
+  # git < 2.28 没有 -b
+  git -C "$DEST" init -q
+  git -C "$DEST" symbolic-ref HEAD refs/heads/main
+fi
 git -C "$DEST" add -A
 git -C "$DEST" commit -q -m "初始化: 从 _template 生成项目骨架"
 

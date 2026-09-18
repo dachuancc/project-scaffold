@@ -15,7 +15,11 @@ cd ~/Documents/projects
 ./new-project hello-finance "个人记账小工具" "Python 3.12 + FastAPI + SQLite"
 ```
 
-会从 `_template/` 生成一个项目目录并 `git init` + 首次提交。
+会从 `_template/` 生成一个项目目录并 `git init -b main` + 首次提交。
+
+> **初始分支固定 `main`，不读 `init.defaultBranch`**——那台机器没配的话，
+> git 会回落到内置默认（`master`），项目之间就会漂移。历史上就出过一次：
+> 9 个项目里 8 个 `master`、1 个 `main`，2026-09 统一到 `main`。
 
 > `~/Documents/projects/new-project` 是指向本脚本的符号链接；
 > 脚本用真实路径定位 `_template/`，因此从任何目录调用都行，
